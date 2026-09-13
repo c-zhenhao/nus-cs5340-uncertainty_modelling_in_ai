@@ -120,6 +120,38 @@ def test_observe_evidence():
 
 
 @wrap_test
+def test_factor_sum():
+    # factorA contains phi(X_0)
+    factor0 = Factor(var=[0],
+                     card=[2],
+                     val=[0.8, 0.2])
+    # factor1 contains phi(X_1|X_0)
+    factor1 = Factor(var=[0, 1],
+                     card=[2, 2],
+                     val=[0.4, 0.55, 0.6, 0.45])
+
+    correct = Factor(var=[0, 1],
+                     card=[2, 2],
+                     val=[1.2, 0.75, 1.4, 0.65])
+
+    output = factor_sum(factor0, factor1)
+    assert output == correct, STR_OUTPUT_MISMATCH
+
+
+@wrap_test
+def test_compute_joint_distribution():
+    factors = load_factor_list_from_json("data/graph_small.json")
+    joint = compute_joint_distribution(factors)
+
+    # graph_small has variables X0..X4 with cardinalities 3,4,2,3,3,
+    # giving 3*4*2*3*3 = 216 joint assignments; the joint should sum to 1
+    assert np.array_equal(joint.var, np.array([0, 1, 2, 3, 4])), STR_OUTPUT_MISMATCH
+    assert np.array_equal(joint.card, np.array([3, 4, 2, 3, 3])), STR_OUTPUT_MISMATCH
+    assert len(joint.val) == 216, STR_OUTPUT_MISMATCH
+    assert np.allclose(np.sum(joint.val), 1.0), STR_OUTPUT_MISMATCH
+
+
+@wrap_test
 def test_compute_marginals_naive():
     for graph in GRAPH_DATA:
         factors = load_factor_list_from_json(
@@ -163,25 +195,6 @@ def test_compute_marginals_bp():
         pass
     else:
         raise AssertionError('Zero-probability evidence should raise ValueError.')
-
-
-@wrap_test
-def test_factor_sum():
-    # factorA contains phi(X_0)
-    factor0 = Factor(var=[0],
-                     card=[2],
-                     val=[0.8, 0.2])
-    # factor1 contains phi(X_1|X_0)
-    factor1 = Factor(var=[0, 1],
-                     card=[2, 2],
-                     val=[0.4, 0.55, 0.6, 0.45])
-
-    correct = Factor(var=[0, 1],
-                     card=[2, 2],
-                     val=[1.2, 0.75, 1.4, 0.65])
-
-    output = factor_sum(factor0, factor1)
-    assert output == correct, STR_OUTPUT_MISMATCH
 
 
 @wrap_test
@@ -235,6 +248,7 @@ if __name__ == '__main__':
     test_factor_product()
     test_factor_marginalize()
     test_observe_evidence()
+    test_compute_joint_distribution()
     test_compute_marginals_naive()
     test_compute_marginals_bp()
     test_factor_sum()

@@ -1,9 +1,9 @@
 """ CS5340 Lab 1: Belief Propagation and Maximal Probability
 See accompanying PDF for instructions.
 
-Name: <Your Name here>
-Email: <username>@u.nus.edu
-Student ID: A0123456X
+Name: Chen Zhenhao
+Email: zhenhaoc@u.nus.edu / e1590318@u.nus.edu
+Student ID: A0338240L
 """
 
 import copy
@@ -53,6 +53,13 @@ def factor_product(A, B):
       understand what the above lines are doing, in order to implement
       subsequent parts.
     """
+    # A.val = [0.8, 0.2]
+    # B.val = [0.4, 0.55, 0.6, 0.45]
+    # A.val[idxA] = [0.8, 0.2, 0.8, 0.2]
+    # B.val[idxB] = [0.4, 0.55, 0.6, 0.45]
+    # = [0.32, 0.11, 0.48, 0.09]
+    out.val = A.val[idxA] * B.val[idxB]
+
     return out
 
 
@@ -71,6 +78,42 @@ def factor_marginalize(factor, var):
     """ YOUR CODE HERE
     Marginalize out the variables given in var
     """
+    # 1. create output factor over remaining variables
+    remaining_vars = []
+    remaining_cards = []
+    remaining_indices = []
+
+    for i in range(len(factor.var)):
+        variable = factor.var[i]
+
+        if variable not in var:
+            remaining_vars.append(variable)
+            remaining_cards.append(factor.card[i])
+            remaining_indices.append(i)
+
+    out.var = np.array(remaining_vars)
+    out.card = np.array(remaining_cards)
+
+    # 2. enumerate every input assignment
+    num_assignments = int(np.prod(out.card))
+    out.val = np.zeros(num_assignments)
+
+    # 3. project each input assignment onto the remaining variables.
+    input_assignments = factor.get_all_assignments()
+
+    # 4. find which output row it maps to
+    for i in range(len(factor.val)):
+        assignment = input_assignments[i]
+
+        output_assignment = assignment[remaining_indices]
+
+        output_index = assignment_to_index(
+            output_assignment,
+            out.card
+        )
+
+        # and accumulate its value
+        out.val[output_index] += factor.val[i]
 
     return out
 
@@ -98,11 +141,19 @@ def observe_evidence(factors, evidence=None):
     Set the probabilities of assignments which are inconsistent with the 
     evidence to zero.
     """
+    for factor in out:
+        assignments = factor.get_all_assignments()
+
+        for evidence_var, evidence_value in evidence.items():
+            if evidence_var in factor.var:
+                column = np.where(factor.var == evidence_var)[0][0]
+                inconsistent = assignments[:, column] != evidence_value
+                factor.val[inconsistent] = 0
 
     return out
 
 
-"""For max sum meessage passing (for MAP)"""
+"""For max sum message passing (for MAP)"""
 def factor_sum(A, B):
     """Same as factor_product, but sums instead of multiplies
     """
@@ -135,33 +186,9 @@ def factor_sum(A, B):
     You should populate the .val field with the factor sum. The code for this
     should be very similar to the factor_product().
     """
-
-    return out
-
-
-def factor_max_marginalize(factor, var):
-    """Marginalize over a list of variables by taking the max.
-
-    Args:
-        factor (Factor): Input factor
-        var (List): Variable to marginalize out.
-
-    Returns:
-        out: Factor with variables in 'var' marginalized out. The factor's
-          .val_argmax field should be a list of dictionary that keep track
-          of the maximizing values of the marginalized variables.
-          e.g. when out.val_argmax[i][j] = k, this means that
-            when assignments of out is index_to_assignment[i],
-            variable j has a maximizing value of k.
-          See test_lab1.py::test_factor_max_marginalize() for an example.
-    """
-    out = Factor()
-
-    """ YOUR CODE HERE
-    Marginalize out the variables given in var. 
-    You should make use of val_argmax to keep track of the location with the
-    maximum probability.
-    """
+    # [0.8, 0.2, 0.8, 0.2] + [0.4, 0.55, 0.6, 0.45]
+    # =[1,2, 0.75, 1.4, 0.65]
+    out.val = A.val[idxA] + B.val[idxB]
 
     return out
 
@@ -181,6 +208,8 @@ def compute_joint_distribution(factors):
     Compute the joint distribution from the list of factors. You may assume
     that the input factors are valid so no input checking is required.
     """
+    for factor in factors:
+        joint = factor_product(joint, factor)
 
     return joint
 
@@ -206,8 +235,73 @@ def compute_marginals_naive(V, factors, evidence):
     Compute the marginal. Output should be a factor.
     Remember to normalize the probabilities!
     """
+    # 1. compute full join distribution
+    joint = compute_joint_distribution(factors)
+
+    # 2. apply evidence
+    conditioned = observe_evidence([joint], evidence)[0]
+
+    # 3. marginalize out irrelevant variables
+    vars_to_marginalize = []
+    for variable in conditioned.var:
+        if variable != V:
+            vars_to_marginalize.append(variable)
+
+    # 4. normalize final factor
+    output = factor_marginalize(conditioned, vars_to_marginalize)
+
+    total = np.sum(output.val)
+
+    if np.isclose(total, 0.0):
+        raise ValueError("Evidence has zero probability")
+
+    output.val = output.val / total
 
     return output
+
+
+def send_message(graph, messages, i, j):
+    message_factor = Factor()
+
+    if 'factor' in graph.nodes[i]:
+        message_factor = factor_product(
+            message_factor,
+            graph.nodes[i]['factor']
+        )
+
+    for neighbor in graph.neighbors(i):
+        if neighbor != j:
+            message_factor = factor_product(
+                message_factor,
+                messages[neighbor][i]
+            )
+
+    message_factor = factor_product(
+        message_factor,
+        graph.edges[i, j]['factor']
+    )
+
+    messages[i][j] = factor_marginalize(message_factor, [i])
+
+
+def collect_messages(graph, messages, node, parent):
+    for neighbor in graph.neighbors(node):
+        if neighbor == parent:
+            continue
+
+        collect_messages(graph, messages, neighbor, node)
+
+    if parent is not None:
+        send_message(graph, messages, node, parent)
+
+
+def distribute_messages(graph, messages, node, parent):
+    for neighbor in graph.neighbors(node):
+        if neighbor == parent:
+            continue
+
+        send_message(graph, messages, node, neighbor)
+        distribute_messages(graph, messages, neighbor, node)
 
 
 def compute_marginals_bp(V, factors, evidence):
@@ -251,6 +345,7 @@ def compute_marginals_bp(V, factors, evidence):
     graph. Recall the message passing protocol, that a node can only send a
     message to a neighboring node only when it has received messages from all
     its other neighbors.
+    
     Since the provided graphical model is a tree, we can use a two-phase 
     approach. First we send messages inward from leaves towards the root.
     After this is done, we can send messages from the root node outward.
@@ -258,8 +353,160 @@ def compute_marginals_bp(V, factors, evidence):
     Hint: You might find it useful to add auxilliary functions. You may add 
       them as either inner (nested) or external functions.
     """
+    collect_messages(graph, messages, root, None)
+    distribute_messages(graph, messages, root, None)
+
+    # compute marginals
+    for variable in V:
+        marginal = Factor()
+
+        # include unary factor if this node has one
+        if 'factor' in graph.nodes[variable]:
+            marginal = factor_product(
+                marginal,
+                graph.nodes[variable]['factor']
+            )
+
+        # multiply all incoming messages
+        for neighbor in graph.neighbors(variable):
+            marginal = factor_product(
+                marginal,
+                messages[neighbor][variable]
+            )
+
+        # normalize
+        total = np.sum(marginal.val)
+
+        if np.isclose(total, 0.0):
+            raise ValueError("Evidence has zero probability")
+
+        marginal.val = marginal.val / total
+
+        marginals.append(marginal)
 
     return marginals
+
+
+def factor_max_marginalize(factor, var):
+    """Marginalize over a list of variables by taking the max.
+
+    Args:
+        factor (Factor): Input factor
+        var (List): Variable to marginalize out.
+
+    Returns:
+        out: Factor with variables in 'var' marginalized out. The factor's
+          .val_argmax field should be a list of dictionary that keep track
+          of the maximizing values of the marginalized variables.
+          e.g. when out.val_argmax[i][j] = k, this means that
+            when assignments of out is index_to_assignment[i],
+            variable j has a maximizing value of k.
+          See test_lab1.py::test_factor_max_marginalize() for an example.
+    """
+    out = Factor()
+
+    """ YOUR CODE HERE
+    Marginalize out the variables given in var.
+
+    You should make use of val_argmax to keep track of the location with the
+    maximum probability.
+    """
+    # separate variables into those we keep and those we maximize out
+    remaining_vars = []
+    remaining_cards = []
+    remaining_indices = []
+    marginalized_indices = []
+
+    for i in range(len(factor.var)):
+        variable = factor.var[i]
+
+        if variable not in var:
+            remaining_vars.append(variable)
+            remaining_cards.append(factor.card[i])
+            remaining_indices.append(i)
+        else:
+            marginalized_indices.append(i)
+
+    # initialize output factor and enum all input assignments
+    out.var = np.array(remaining_vars)
+    out.card = np.array(remaining_cards)
+
+    num_assignments = int(np.prod(out.card))
+
+    out.val = np.full(num_assignments, -np.inf)
+    out.val_argmax = [None] * num_assignments
+
+    input_assignments = factor.get_all_assignments()
+
+    # map each input assignment to output assignment
+    for i in range(len(factor.val)):
+        assignment = input_assignments[i]
+
+        output_assignment = assignment[remaining_indices]
+        output_index = assignment_to_index(
+            output_assignment,
+            out.card
+        )
+
+        # keep only maximum value for each output assignment
+        if factor.val[i] > out.val[output_index]:
+            out.val[output_index] = factor.val[i]
+
+            argmax_assignment = {}
+
+            for index in marginalized_indices:
+                variable = factor.var[index]
+                value = assignment[index]
+                argmax_assignment[variable] = value
+
+            # record marginalised values that achieved it
+            out.val_argmax[output_index] = argmax_assignment
+    
+    return out
+
+
+def send_max_message(graph, messages, i, j):
+    message_factor = Factor()
+
+    if 'factor' in graph.nodes[i]:
+        message_factor = factor_sum(
+            message_factor,
+            graph.nodes[i]['factor']
+        )
+
+    for neighbor in graph.neighbors(i):
+        # in max message skip receipient
+        # message to j must only use information coming into i from other neighbours
+        if neighbor == j:
+            continue
+
+        # In log-space, multiplying probabilities becomes addition
+        # so we use factor_sum instead of factor_product
+        message_factor = factor_sum(
+            message_factor,
+            messages[neighbor][i]
+        )
+
+    message_factor = factor_sum(
+        message_factor,
+        graph.edges[i, j]['factor']
+    )
+
+    messages[i][j] = factor_max_marginalize(
+        message_factor,
+        [i]
+    )
+
+
+def collect_max_messages(graph, messages, node, parent):
+    for neighbor in graph.neighbors(node):
+        if neighbor == parent:
+            continue
+
+        collect_max_messages(graph, messages, neighbor, node)
+
+    if parent is not None:
+        send_max_message(graph, messages, node, parent)
 
 
 def map_eliminate(factors, evidence):
@@ -293,11 +540,94 @@ def map_eliminate(factors, evidence):
     Use the algorithm from lecture 5 and perform message passing over the entire
     graph to obtain the MAP configuration. Again, recall the message passing 
     protocol.
+
     Your code should be similar to compute_marginals_bp().
+    
     To avoid underflow, first transform the factors in the probabilities
     to **log scale** and perform all operations on log scale instead.
+    
     You may ignore the warning for taking log of zero, that is the desired
     behavior.
     """
+    # 1. apply evidence and make a copy so the caller's factors are not modified
+    factors = observe_evidence(factors, evidence)
+
+    # convert probabilities to log-space
+    for factor in factors:
+        with np.errstate(divide='ignore'):
+            factor.val = np.log(factor.val)
+
+    # 2. build tree and initialise message storage
+    graph = generate_graph_from_factors(factors)
+    root = 0
+
+    num_nodes = graph.number_of_nodes()
+    messages = [[None] * num_nodes for _ in range(num_nodes)]
+
+    # 3. send max-sum messages inward towards root
+    collect_max_messages(graph, messages, root, None)
+
+    # 4. compute the root score after the inward max-message pass
+    root_factor = Factor()
+
+    if 'factor' in graph.nodes[root]:
+        root_factor = factor_sum(
+            root_factor,
+            graph.nodes[root]['factor']
+        )
+
+    # combine at root
+    for neighbor in graph.neighbors(root):
+        root_factor = factor_sum(
+            root_factor,
+            messages[neighbor][root]
+        )
+
+    # pick best root state
+    # this should be cast to int because index_to_assignment
+    # expect a python int for scalar input
+    root_index = int(np.argmax(root_factor.val))
+    log_prob_max = root_factor.val[root_index]
+
+    if np.isneginf(log_prob_max):
+        raise ValueError("Evidence has zero probability")
+
+    root_assignment = index_to_assignment(
+        root_index,
+        root_factor.card
+    )
+
+    root_value = root_assignment[0]
+
+    if root not in evidence:
+        max_decoding[root] = root_value
+
+    # 5. backtrack from chosen root value using message's val_argmax
+    # to recover the maximizing value of every child variable
+    def decode_children(node, parent, node_value):
+        for child in graph.neighbors(node):
+            if child == parent:
+                continue
+
+            message = messages[child][node]
+
+            # message is a factor over node
+            # this should also be int
+            message_index = int(assignment_to_index(
+                [node_value],
+                message.card
+            ))
+
+            argmax = message.val_argmax[message_index]
+
+            child_value = argmax[child]
+
+            if child not in evidence:
+                max_decoding[child] = child_value
+
+            decode_children(child, node, child_value)
+
+    decode_children(root, None, root_value)
 
     return max_decoding, log_prob_max
+
