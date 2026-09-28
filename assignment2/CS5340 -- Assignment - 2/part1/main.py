@@ -110,14 +110,14 @@ def _update_mrf_w_evidence(all_nodes, evidence, edges, factors):
     """ YOUR CODE HERE """
     evidence_nodes = set(evidence.keys())
 
-    # 1. Keep only non-evidence nodes
+    # 1. keep only non-evidence nodes
     query_nodes = np.array([
         node
         for node in all_nodes
         if node not in evidence_nodes
     ])
 
-    # 2. Keep only edges whose endpoints are both unobserved
+    # 2. keep only edges whose endpoints are both unobserved
     remaining_edges = []
 
     for edge in edges:
@@ -134,14 +134,14 @@ def _update_mrf_w_evidence(all_nodes, evidence, edges, factors):
             dtype=np.int64
         )
 
-    # 3. Condition every factor on evidence
+    # 3. condition every factor on evidence
     updated_factors = []
 
     for factor in factors:
 
         reduced_factor = factor_evidence(factor, evidence)
 
-        # 4. Fully observed factors become empty
+        # 4. fully observed factors become empty
         if not reduced_factor.is_empty():
             updated_factors.append(reduced_factor)
 
@@ -166,7 +166,7 @@ def _get_clique_potentials(jt_cliques, jt_edges, jt_clique_factors):
     clique_potentials = jt_clique_factors
 
     """ YOUR CODE HERE """
-    # Build neighbor lists
+    # build neighbor lists
     neighbors = {
         i: set()
         for i in range(len(jt_cliques))
@@ -177,7 +177,7 @@ def _get_clique_potentials(jt_cliques, jt_edges, jt_clique_factors):
 
     messages = {}
 
-    # Compute every directed message
+    # compute every directed message
     for src, dst in jt_edges:
         _send_message(
             int(src),
@@ -190,8 +190,7 @@ def _get_clique_potentials(jt_cliques, jt_edges, jt_clique_factors):
 
     clique_potentials = []
 
-    # Each final clique potential =
-    # local factor * all incoming messages
+    # each final clique potential = local factor * all incoming messages
     for i in range(len(jt_cliques)):
 
         potential = copy.deepcopy(
@@ -237,7 +236,7 @@ def _get_node_marginal_probabilities(query_nodes, cliques, clique_potentials):
     """ YOUR CODE HERE """
     for node in query_nodes:
 
-        # Find every clique containing this node
+        # find every clique containing this node
         candidate_indices = [
             i
             for i, clique in enumerate(cliques)
@@ -248,7 +247,7 @@ def _get_node_marginal_probabilities(query_nodes, cliques, clique_potentials):
             f"No clique contains node {node}"
         )
 
-        # Efficient choice: use the smallest clique
+        # efficient choice: use the smallest clique
         clique_idx = min(
             candidate_indices,
             key=lambda i: len(cliques[i])
@@ -258,7 +257,7 @@ def _get_node_marginal_probabilities(query_nodes, cliques, clique_potentials):
             clique_potentials[clique_idx]
         )
 
-        # Sum out everything except `node`
+        # sum out everything except node
         vars_to_eliminate = np.array([
             v
             for v in potential.var

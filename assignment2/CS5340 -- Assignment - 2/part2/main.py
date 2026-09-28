@@ -38,6 +38,21 @@ def _learn_node_parameter_w(outputs, inputs=None):
     weights = np.zeros(shape=num_inputs + 1)
 
     """ YOUR CODE HERE """
+    # number of observations
+    N = len(outputs)
+
+    # construct design matrix; first column corresponds to bias w0.
+    if inputs is None:
+        X = np.ones((N, 1))
+    else:
+        X = np.hstack([np.ones((N, 1)), inputs])
+
+    # normal equations:
+    # (X^T X) w = X^T y
+    A = X.T @ X
+    b = X.T @ outputs
+
+    weights = np.linalg.solve(A, b)
 
     """ END YOUR CODE HERE """
 
@@ -59,6 +74,16 @@ def _learn_node_parameter_var(outputs, weights, inputs):
     var = 0.
 
     """ YOUR CODE HERE """
+    N = len(outputs)
+
+    if inputs is None:
+        predicted = weights[0] * np.ones(N)
+    else:
+        predicted = weights[0] + inputs @ weights[1:]
+
+    residuals = outputs - predicted
+
+    var = np.mean(residuals ** 2)
 
     """ END YOUR CODE HERE """
 
@@ -94,6 +119,41 @@ def _get_learned_parameters(nodes, edges, observations):
     parameters = {}
 
     """ YOUR CODE HERE """
+    for node in nodes:
+        # find parents: edges are [parent, child]
+        parents = [
+            int(p) for p, c in edges if c == node
+        ]
+
+        outputs = np.array(observations[str(node)])
+
+        if len(parents) == 0:
+            inputs = None
+        else:
+            inputs = np.column_stack([
+                np.array(observations[str(p)]) for p in parents
+            ])
+
+        weights = _learn_node_parameter_w(
+            outputs=outputs,
+            inputs=inputs,
+        )
+
+        var = _learn_node_parameter_var(
+            outputs=outputs,
+            weights=weights,
+            inputs=inputs,
+        )
+
+        node_parameters = {
+            "bias": weights[0],
+            "variance": var,
+        }
+
+        for i, parent in enumerate(parents):
+            node_parameters[str(parent)] = weights[i + 1]
+
+        parameters[str(node)] = node_parameters
 
     """ END YOUR CODE HERE """
 
