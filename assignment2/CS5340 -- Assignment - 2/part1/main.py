@@ -1,11 +1,11 @@
 """ CS5340 Lab 2 Part 1: Junction Tree Algorithm
 See accompanying PDF for instructions.
 
-Name: <Your Name here>
-Email: <username>@u.nus.edu
-Student ID: A0123456X
+Name: Chen Zhenhao
+Email: e1590318@u.nus.edu
+Student ID: A0332840L
 """
-
+import copy
 import os
 import numpy as np
 import json
@@ -23,7 +23,66 @@ PREDICTION_DIR = os.path.join(DATA_DIR, 'predictions')  # we will store the pred
 
 
 """ ADD HELPER FUNCTIONS HERE """
+def _send_message(
+    src,
+    dst,
+    jt_cliques,
+    neighbors,
+    jt_clique_factors,
+    messages,
+):
+    # Already computed?
+    if (src, dst) in messages:
+        return messages[(src, dst)]
 
+    # Start with src's own clique factor
+    combined = copy.deepcopy(
+        jt_clique_factors[src]
+    )
+
+    # Collect incoming messages from every neighbor
+    # except the destination
+    for neighbor in neighbors[src]:
+
+        if neighbor == dst:
+            continue
+
+        incoming = _send_message(
+            neighbor,
+            src,
+            jt_cliques,
+            neighbors,
+            jt_clique_factors,
+            messages,
+        )
+        if incoming.is_empty():
+            continue
+
+        if combined.is_empty():
+            combined = copy.deepcopy(incoming)
+        else:
+            combined = factor_product(combined, incoming)
+
+    # Separator S_src,dst
+    separator = np.intersect1d(
+        jt_cliques[src],
+        jt_cliques[dst]
+    )
+
+    # Variables that must be summed out
+    vars_to_eliminate = np.setdiff1d(
+        combined.var,
+        separator
+    )
+
+    if len(vars_to_eliminate) == 0:
+        message = copy.deepcopy(combined)
+    else:
+        message = factor_marginalize(combined, vars_to_eliminate)
+
+    messages[(src, dst)] = message
+
+    return message
 
 """ END HELPER FUNCTIONS HERE """
 
@@ -49,6 +108,42 @@ def _update_mrf_w_evidence(all_nodes, evidence, edges, factors):
     updated_factors = factors
 
     """ YOUR CODE HERE """
+    evidence_nodes = set(evidence.keys())
+
+    # 1. Keep only non-evidence nodes
+    query_nodes = np.array([
+        node
+        for node in all_nodes
+        if node not in evidence_nodes
+    ])
+
+    # 2. Keep only edges whose endpoints are both unobserved
+    remaining_edges = []
+
+    for edge in edges:
+        u, v = edge
+
+        if u not in evidence_nodes and v not in evidence_nodes:
+            remaining_edges.append([u, v])
+
+    if len(remaining_edges) == 0:
+        updated_edges = np.empty((0, 2), dtype=np.int64)
+    else:
+        updated_edges = np.array(
+            remaining_edges,
+            dtype=np.int64
+        )
+
+    # 3. Condition every factor on evidence
+    updated_factors = []
+
+    for factor in factors:
+
+        reduced_factor = factor_evidence(factor, evidence)
+
+        # 4. Fully observed factors become empty
+        if not reduced_factor.is_empty():
+            updated_factors.append(reduced_factor)
 
     """ END YOUR CODE HERE """
 
@@ -71,10 +166,56 @@ def _get_clique_potentials(jt_cliques, jt_edges, jt_clique_factors):
     clique_potentials = jt_clique_factors
 
     """ YOUR CODE HERE """
+    # Build neighbor lists
+    neighbors = {
+        i: set()
+        for i in range(len(jt_cliques))
+    }
 
+    for i, j in jt_edges:
+        neighbors[int(i)].add(int(j))
+
+    messages = {}
+
+    # Compute every directed message
+    for src, dst in jt_edges:
+        _send_message(
+            int(src),
+            int(dst),
+            jt_cliques,
+            neighbors,
+            jt_clique_factors,
+            messages,
+        )
+
+    clique_potentials = []
+
+    # Each final clique potential =
+    # local factor * all incoming messages
+    for i in range(len(jt_cliques)):
+
+        potential = copy.deepcopy(
+            jt_clique_factors[i]
+        )
+
+        for neighbor in neighbors[i]:
+
+            incoming = messages[
+                (neighbor, i)
+            ]
+            if incoming.is_empty():
+                continue
+
+            if potential.is_empty():
+                potential = copy.deepcopy(incoming)
+            else:
+                potential = factor_product(potential, incoming)
+
+        clique_potentials.append(potential)
     """ END YOUR CODE HERE """
 
     assert len(clique_potentials) == len(jt_cliques)
+
     return clique_potentials
 
 
@@ -94,6 +235,54 @@ def _get_node_marginal_probabilities(query_nodes, cliques, clique_potentials):
     query_marginal_probabilities = []
 
     """ YOUR CODE HERE """
+    for node in query_nodes:
+
+        # Find every clique containing this node
+        candidate_indices = [
+            i
+            for i, clique in enumerate(cliques)
+            if node in clique
+        ]
+
+        assert len(candidate_indices) > 0, (
+            f"No clique contains node {node}"
+        )
+
+        # Efficient choice: use the smallest clique
+        clique_idx = min(
+            candidate_indices,
+            key=lambda i: len(cliques[i])
+        )
+
+        potential = copy.deepcopy(
+            clique_potentials[clique_idx]
+        )
+
+        # Sum out everything except `node`
+        vars_to_eliminate = np.array([
+            v
+            for v in potential.var
+            if v != node
+        ])
+
+        if len(vars_to_eliminate) > 0:
+            marginal = factor_marginalize(potential, vars_to_eliminate)
+        else:
+            marginal = potential
+
+        # Normalize
+        total = np.sum(marginal.val)
+
+        assert total > 0, (
+            f"Cannot normalize marginal for node {node}: "
+            f"sum is {total}"
+        )
+
+        marginal.val = marginal.val / total
+
+        query_marginal_probabilities.append(
+            marginal
+        )
 
     """ END YOUR CODE HERE """
 

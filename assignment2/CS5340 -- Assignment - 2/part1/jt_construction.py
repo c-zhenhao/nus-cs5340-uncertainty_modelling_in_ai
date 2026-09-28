@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 import networkx as nx
 from networkx.algorithms import tree
@@ -25,6 +26,27 @@ def _get_clique_factors(jt_cliques, factors):
     clique_factors = [Factor() for _ in jt_cliques]
 
     """ YOUR CODE HERE """
+    for factor in factors:
+        factor_vars = set(factor.var)
+        assigned = False
+
+        for i, clique in enumerate(jt_cliques):
+            clique_vars = set(clique)
+
+            if factor_vars.issubset(clique_vars):
+
+                if clique_factors[i].is_empty():
+                    clique_factors[i] = copy.deepcopy(factor)
+                else:
+                    clique_factors[i] = factor_product(clique_factors[i], factor)
+
+                assigned = True
+                break
+
+        assert assigned, (
+            f"No clique contains factor variables "
+            f"{factor.var}"
+        )
 
     """ END YOUR CODE HERE """
 
@@ -49,9 +71,60 @@ def _get_jt_clique_and_edges(nodes, edges):
             and cliques[j] are neighbors.
     """
     jt_cliques = []
-    jt_edges = np.array(edges)  # dummy value
+    # jt_edges = np.array(edges)  # dummy value
 
     """ YOUR CODE HERE """
+    # build original undirected graph
+    G = nx.Graph()
+    G.add_nodes_from(nodes)
+    G.add_edges_from(edges)
+
+    # from lecture 5, triangulation first before clique construction
+    G_chordal, _ = nx.complete_to_chordal_graph(G)
+
+    # 1. find maximal cliques
+    jt_cliques = [
+        sorted(list(c))
+        for c in nx.find_cliques(G_chordal)
+    ]
+
+    # 2. build clique-intersection graph
+    clique_graph = nx.Graph()
+
+    for i in range(len(jt_cliques)):
+        clique_graph.add_node(i)
+
+    for i in range(len(jt_cliques)):
+        for j in range(i + 1, len(jt_cliques)):
+
+            separator = set(jt_cliques[i]).intersection(
+                jt_cliques[j]
+            )
+
+            if len(separator) > 0:
+                clique_graph.add_edge(
+                    i,
+                    j,
+                    weight=len(separator)
+                )
+
+    # 3. take maximum spanning tree
+    mst = nx.maximum_spanning_tree(
+        clique_graph,
+        weight="weight"
+    )
+
+    # 4. store both directions
+    jt_edges = []
+    
+    for i, j in mst.edges():
+        jt_edges.append([i, j])
+        jt_edges.append([j, i])
+
+    if len(jt_edges) == 0:
+        jt_edges = np.empty((0, 2), dtype=np.int64)
+    else:
+        jt_edges = np.array(jt_edges, dtype=np.int64)
 
     """ END YOUR CODE HERE """
 
